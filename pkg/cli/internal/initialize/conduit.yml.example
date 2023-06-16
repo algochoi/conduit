@@ -2,7 +2,7 @@
 log-level: INFO
 
 # If no log file is provided logs are written to stdout.
-#log-file:
+log-file: test.log
 
 # Number of retries to perform after a pipeline plugin error.
 # Set to 0 to retry forever.

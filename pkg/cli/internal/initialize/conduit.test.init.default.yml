@@ -1,5 +1,6 @@
 # Generated conduit configuration file.
 log-level: INFO
+log-file: test.log
 
 # When enabled prometheus metrics are available on '/metrics'
 metrics:
