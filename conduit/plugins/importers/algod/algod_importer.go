@@ -442,6 +442,9 @@ func (algodImp *algodImporter) GetBlock(rnd uint64) (data.BlockData, error) {
 		blockbytes, err = algodImp.aclient.BlockRaw(rnd).Do(algodImp.ctx)
 		algodImp.logger.Tracef("importer algod.GetBlock() called BlockRaw(%d) err: %v", rnd, err)
 		dt := time.Since(start)
+
+		algodImp.logger.Infof("BlockRaw: %v err: %v", time.Since(importStart), err)
+
 		getAlgodRawBlockTimeSeconds.Observe(dt.Seconds())
 		if err != nil {
 			algodImp.logger.Errorf("error getting block for round %d (attempt %d): %s", rnd, r, err.Error())
