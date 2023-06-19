@@ -420,9 +420,15 @@ func (algodImp *algodImporter) GetBlock(rnd uint64) (data.BlockData, error) {
 	var status models.NodeStatus
 	var blk data.BlockData
 
+	importStart := time.Now()
+
 	for r := 0; r < retries; r++ {
+
 		status, err = algodImp.aclient.StatusAfterBlock(rnd - 1).Do(algodImp.ctx)
 		algodImp.logger.Tracef("importer algod.GetBlock() called StatusAfterBlock(%d) err: %v", rnd-1, err)
+
+		algodImp.logger.Infof("GetBlock Start: %v err: %v", time.Since(importStart), err)
+
 		if err != nil {
 			// If context has expired.
 			if algodImp.ctx.Err() != nil {
