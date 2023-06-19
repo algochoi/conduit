@@ -417,14 +417,14 @@ func (algodImp *algodImporter) getDelta(rnd uint64) (sdk.LedgerStateDelta, error
 func (algodImp *algodImporter) GetBlock(rnd uint64) (data.BlockData, error) {
 	var blockbytes []byte
 	var err error
-	// var status models.NodeStatus
+	var status models.NodeStatus
 	var blk data.BlockData
 
 	for r := 0; r < retries; r++ {
 
 		importStart := time.Now()
 
-		// status, err = algodImp.aclient.StatusAfterBlock(rnd - 1).Do(algodImp.ctx)
+		status, err = algodImp.aclient.StatusAfterBlock(rnd - 1).Do(algodImp.ctx)
 		algodImp.logger.Tracef("importer algod.GetBlock() called StatusAfterBlock(%d) err: %v", rnd-1, err)
 
 		algodImp.logger.Infof("GetBlock Start: %v err: %v", time.Since(importStart), err)
@@ -466,11 +466,11 @@ func (algodImp *algodImporter) GetBlock(rnd uint64) (data.BlockData, error) {
 				var delta sdk.LedgerStateDelta
 				delta, err = algodImp.getDelta(rnd)
 				if err != nil {
-					// if status.LastRound < rnd {
-					// 	err = fmt.Errorf("ledger state delta not found: node round (%d) is behind required round (%d), ensure follower node has its sync round set to the required round: %w", status.LastRound, rnd, err)
-					// } else {
-					// 	err = fmt.Errorf("ledger state delta not found: node round (%d), required round (%d): verify follower node configuration and ensure follower node has its sync round set to the required round, re-deploying the follower node may be necessary: %w", status.LastRound, rnd, err)
-					// }
+					if status.LastRound < rnd {
+						err = fmt.Errorf("ledger state delta not found: node round (%d) is behind required round (%d), ensure follower node has its sync round set to the required round: %w", status.LastRound, rnd, err)
+					} else {
+						err = fmt.Errorf("ledger state delta not found: node round (%d), required round (%d): verify follower node configuration and ensure follower node has its sync round set to the required round, re-deploying the follower node may be necessary: %w", status.LastRound, rnd, err)
+					}
 					algodImp.logger.Error(err.Error())
 					return data.BlockData{}, err
 				}
