@@ -416,6 +416,7 @@ func (p *pipelineImpl) Start() {
 						goto pipelineRun
 					}
 					metrics.ImporterTimeSeconds.Observe(time.Since(importStart).Seconds())
+					p.logger.Infof("Import time: %v", time.Since(importStart))
 
 					// TODO: Verify that the block was built with a known protocol version.
 
