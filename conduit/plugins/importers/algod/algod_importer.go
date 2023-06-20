@@ -424,14 +424,11 @@ func (algodImp *algodImporter) GetBlock(rnd uint64) (data.BlockData, error) {
 
 		importStart := time.Now()
 
-		if rnd > 1 {
-			status, err = algodImp.aclient.StatusAfterBlock(rnd - 2).Do(algodImp.ctx)
-		} else {
-			status, err = algodImp.aclient.StatusAfterBlock(rnd - 1).Do(algodImp.ctx)
-		}
+		status, err = algodImp.aclient.StatusAfterBlock(rnd - 1).Do(algodImp.ctx)
 		algodImp.logger.Tracef("importer algod.GetBlock() called StatusAfterBlock(%d) err: %v", rnd-1, err)
 
 		algodImp.logger.Infof("GetBlock Start: %v err: %v", time.Since(importStart), err)
+		algodImp.logger.Infof("GetBlock status: %v\n", status)
 
 		if err != nil {
 			// If context has expired.
@@ -467,6 +464,7 @@ func (algodImp *algodImporter) GetBlock(rnd uint64) (data.BlockData, error) {
 		if algodImp.mode == followerMode {
 			// Round 0 has no delta associated with it
 			if rnd != 0 {
+				dtt := time.Now()
 				var delta sdk.LedgerStateDelta
 				delta, err = algodImp.getDelta(rnd)
 				if err != nil {
@@ -479,6 +477,8 @@ func (algodImp *algodImporter) GetBlock(rnd uint64) (data.BlockData, error) {
 					return data.BlockData{}, err
 				}
 				blk.Delta = &delta
+				algodImp.logger.Infof("BlockRaw: %v\n", time.Since(dtt))
+
 			}
 		}
 
