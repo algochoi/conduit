@@ -424,7 +424,11 @@ func (algodImp *algodImporter) GetBlock(rnd uint64) (data.BlockData, error) {
 
 		importStart := time.Now()
 
-		status, err = algodImp.aclient.StatusAfterBlock(rnd - 2).Do(algodImp.ctx)
+		if rnd > 1 {
+			status, err = algodImp.aclient.StatusAfterBlock(rnd - 2).Do(algodImp.ctx)
+		} else {
+			status, err = algodImp.aclient.StatusAfterBlock(rnd - 1).Do(algodImp.ctx)
+		}
 		algodImp.logger.Tracef("importer algod.GetBlock() called StatusAfterBlock(%d) err: %v", rnd-1, err)
 
 		algodImp.logger.Infof("GetBlock Start: %v err: %v", time.Since(importStart), err)
@@ -478,7 +482,7 @@ func (algodImp *algodImporter) GetBlock(rnd uint64) (data.BlockData, error) {
 			}
 		}
 
-		// time.Sleep(1 * time.Second)
+		time.Sleep(1 * time.Second)
 
 		return blk, err
 	}
