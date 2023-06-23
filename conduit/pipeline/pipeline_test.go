@@ -25,11 +25,12 @@ import (
 
 	"github.com/algorand/conduit/conduit"
 	"github.com/algorand/conduit/conduit/data"
-	_ "github.com/algorand/conduit/conduit/metrics"
+	"github.com/algorand/conduit/conduit/metrics"
 	"github.com/algorand/conduit/conduit/plugins"
 	"github.com/algorand/conduit/conduit/plugins/exporters"
 	"github.com/algorand/conduit/conduit/plugins/importers"
 	"github.com/algorand/conduit/conduit/plugins/processors"
+	"github.com/algorand/conduit/conduit/telemetry"
 )
 
 // a unique block data to validate with tests
@@ -529,6 +530,44 @@ func TestPipelineMetricsConfigs(t *testing.T) {
 	assert.Equal(t, pImpl.cfg.Metrics.Prefix, prefixOverride)
 }
 
+func TestPipelineTelemetryConfigs(t *testing.T) {
+	pImpl, _, _, _, _ := mockPipeline(t, "")
+
+	// telemetry OFF, check that client is nil
+	pImpl.cfg.Telemetry = data.Telemetry{
+		Enabled: false,
+	}
+	pImpl.Init()
+	baseClient := (*pImpl.initProvider).GetTelemetryClient()
+	assert.Nil(t, baseClient)
+
+	// telemetry ON
+	pImpl.cfg.Telemetry = data.Telemetry{
+		Enabled:  true,
+		URI:      "test-uri",
+		Index:    "test-index",
+		UserName: "test-username",
+		Password: "test-password",
+	}
+	pImpl.Init()
+	baseClient = (*pImpl.initProvider).GetTelemetryClient()
+	client := baseClient.(*telemetry.OpenSearchClient)
+
+	assert.NotNil(t, client)
+	assert.NotNil(t, client.Client)
+	assert.Equal(t, true, client.TelemetryConfig.Enable)
+	assert.Equal(t, "test-uri", client.TelemetryConfig.URI)
+	assert.Equal(t, "test-index", client.TelemetryConfig.Index)
+	assert.Equal(t, "test-username", client.TelemetryConfig.UserName)
+	assert.Equal(t, "test-password", client.TelemetryConfig.Password)
+
+	event := client.MakeTelemetryStartupEvent()
+	assert.Equal(t, "starting conduit", event.Message)
+	assert.NotEmpty(t, event.Time)
+	assert.NotEmpty(t, event.GUID)
+	assert.NotEmpty(t, event.Version)
+}
+
 func TestRoundOverrideValidConflict(t *testing.T) {
 	t.Run("processor_no_conflict", func(t *testing.T) {
 		pImpl, _, mImporter, mProcessor, _ := mockPipeline(t, "")
@@ -814,4 +853,94 @@ func TestMetricPrefixApplied(t *testing.T) {
 	pImpl.cfg.Metrics.Prefix = prefix
 	pImpl.registerPluginMetricsCallbacks()
 	assert.Equal(t, prefix, mImporter.subsystem)
+}
+
+func TestMetrics(t *testing.T) {
+	// This test cannot run in parallel because the metrics are global.
+	basicTxn := func(t sdk.TxType) sdk.SignedTxnWithAD {
+		return sdk.SignedTxnWithAD{
+			SignedTxn: sdk.SignedTxn{
+				Txn: sdk.Transaction{
+					Type: t,
+				},
+			},
+		}
+	}
+	txnWithInner := func(t sdk.TxType, inner ...sdk.SignedTxnWithAD) sdk.SignedTxnWithAD {
+		result := basicTxn(t)
+		result.EvalDelta.InnerTxns = inner
+		return result
+	}
+	const round = sdk.Round(1234)
+
+	block := data.BlockData{
+		BlockHeader: sdk.BlockHeader{Round: round},
+		Payset: []sdk.SignedTxnInBlock{
+			{
+				SignedTxnWithAD: basicTxn(sdk.PaymentTx),
+			}, {
+				SignedTxnWithAD: basicTxn(sdk.KeyRegistrationTx),
+			}, {
+				SignedTxnWithAD: basicTxn(sdk.AssetConfigTx),
+			}, {
+				SignedTxnWithAD: basicTxn(sdk.AssetTransferTx),
+			}, {
+				SignedTxnWithAD: basicTxn(sdk.AssetFreezeTx),
+			}, {
+				SignedTxnWithAD: basicTxn(sdk.ApplicationCallTx),
+			}, {
+				SignedTxnWithAD: basicTxn(sdk.StateProofTx),
+			}, {
+				// counted as 1 app call and 6 inner txns
+				SignedTxnWithAD: txnWithInner(sdk.ApplicationCallTx,
+					basicTxn(sdk.PaymentTx),
+					txnWithInner(sdk.ApplicationCallTx,
+						basicTxn(sdk.PaymentTx),
+						basicTxn(sdk.PaymentTx)),
+					basicTxn(sdk.PaymentTx),
+					basicTxn(sdk.PaymentTx)),
+			},
+		},
+	}
+
+	assert.Equal(t, 6, numInnerTxn(block.Payset[7].SignedTxnWithAD))
+
+	metrics.RegisterPrometheusMetrics("add_metrics_test")
+	addMetrics(block, time.Hour)
+	stats, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	found := 0
+	for _, stat := range stats {
+		if strings.HasSuffix(*stat.Name, metrics.BlockImportTimeName) {
+			found++
+			// 1 hour in seconds
+			assert.Contains(t, stat.String(), "sample_count:1 sample_sum:3600")
+		}
+		if strings.HasSuffix(*stat.Name, metrics.ImportedRoundGaugeName) {
+			found++
+			assert.Contains(t, stat.String(), "value:1234")
+		}
+		if strings.HasSuffix(*stat.Name, metrics.ImportedTxnsPerBlockName) {
+			found++
+			assert.Contains(t, stat.String(), "sample_count:1 sample_sum:14")
+		}
+		if strings.HasSuffix(*stat.Name, metrics.ImportedTxnsName) {
+			found++
+			str := stat.String()
+			// the 6 single txns
+			assert.Contains(t, str, `label:<name:"txn_type" value:"acfg" > gauge:<value:1 >`)
+			assert.Contains(t, str, `label:<name:"txn_type" value:"afrz" > gauge:<value:1 >`)
+			assert.Contains(t, str, `label:<name:"txn_type" value:"axfer" > gauge:<value:1 >`)
+			assert.Contains(t, str, `label:<name:"txn_type" value:"keyreg" > gauge:<value:1 >`)
+			assert.Contains(t, str, `label:<name:"txn_type" value:"pay" > gauge:<value:1 >`)
+			assert.Contains(t, str, `label:<name:"txn_type" value:"stpf" > gauge:<value:1 >`)
+
+			// 2 app call txns
+			assert.Contains(t, str, `label:<name:"txn_type" value:"appl" > gauge:<value:2 >`)
+
+			// 1 app had 6 inner txns
+			assert.Contains(t, str, `label:<name:"txn_type" value:"inner" > gauge:<value:6 >`)
+		}
+	}
+	assert.Equal(t, 4, found)
 }
